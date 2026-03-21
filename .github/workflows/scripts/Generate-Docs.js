@@ -525,4 +525,3 @@ function buildDocument(info, repoName) {
     }
   }
 })();
-
