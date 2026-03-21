@@ -29,7 +29,7 @@
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
-  LevelFormat, PageNumber, Footer, Header, TabStopType, TabStopPosition,
+  LevelFormat, Footer, Header, TabStopType, TabStopPosition,
 } = require('docx');
 const fs   = require('fs');
 const path = require('path');
@@ -484,7 +484,7 @@ function buildDocument(info, repoName) {
               children: [
                 new TextRun({ text: 'Frederick Barton  |  ', size: 18, font: 'Arial', color: '808080' }),
                 new TextRun({ text: `Generated ${new Date().toISOString().slice(0, 10)}`, size: 18, font: 'Arial', color: '808080' }),
-                new TextRun({ children: [new PageNumber()], size: 18, font: 'Arial', color: '808080' }),
+                new TextRun({ children: [{ type: 'PAGE' }], size: 18, font: 'Arial', color: '808080' }),
               ],
               alignment: AlignmentType.RIGHT,
               border: { top: { style: BorderStyle.SINGLE, size: 4, color: BLUE_LIGHT, space: 1 } },
@@ -525,3 +525,4 @@ function buildDocument(info, repoName) {
     }
   }
 })();
+
