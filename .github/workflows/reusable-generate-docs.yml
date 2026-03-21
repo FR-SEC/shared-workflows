@@ -1,0 +1,62 @@
+name: Generate Documentation (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version tag (e.g. 1.2)'
+        required: true
+        type: string
+      tag:
+        description: 'Full tag (e.g. v1.2)'
+        required: true
+        type: string
+
+jobs:
+  generate-docs:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout calling repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout shared-workflows (for Generate-Docs.js)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/shared-workflows
+          path: _shared
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install docx package
+        run: npm install docx
+        working-directory: _shared
+
+      - name: Create docs folder if needed
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "docs")) {
+            New-Item -ItemType Directory -Path "docs"
+          }
+
+      - name: Generate Word documents
+        shell: pwsh
+        run: |
+          node _shared/scripts/Generate-Docs.js `
+            --version "${{ inputs.version }}" `
+            --repo "${{ github.repository }}" `
+            --tag "${{ inputs.tag }}"
+
+      - name: Commit and push Word documents
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --staged --quiet || git commit -m "docs: generate documentation for ${{ inputs.tag }}"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
