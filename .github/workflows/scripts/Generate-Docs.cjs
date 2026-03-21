@@ -434,10 +434,23 @@ function buildDocument(projectName, version, repo, tag, sections) {
 
   // Read script contents
   const codeContent = readScripts(scripts, repoRoot);
-  console.log(`Sending ${Math.round(codeContent.length / 1024)}KB to Claude API...`);
+
+  // Read APP_INFO.md if it exists
+  let appInfoContent = '';
+  const appInfoPath = path.join(repoRoot, 'APP_INFO.md');
+  if (fs.existsSync(appInfoPath)) {
+    appInfoContent = fs.readFileSync(appInfoPath, 'utf8');
+    console.log('Found APP_INFO.md — including deployment-specific information');
+  }
+
+  const totalContent = appInfoContent
+    ? `=== DEPLOYMENT INFORMATION (APP_INFO.md) ===\n${appInfoContent}\n\n=== SOURCE CODE ===\n${codeContent}`
+    : codeContent;
+
+  console.log(`Sending ${Math.round(totalContent.length / 1024)}KB to Claude API...`);
 
   // Call Claude API
-  const markdown = await generateDocContent(codeContent, PROJECT_NAME, VERSION, REPO);
+  const markdown = await generateDocContent(totalContent, PROJECT_NAME, VERSION, REPO);
   console.log('Claude API response received');
 
   // Parse sections
