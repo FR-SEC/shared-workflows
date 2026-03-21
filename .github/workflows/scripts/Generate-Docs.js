@@ -1,27 +1,29 @@
 /**
  * =============================================================================
- *  Generate-Docs.js — Word document generator from script headers
+ *  Generate-Docs.js — AI-powered Word document generator for Confluence
  *
  *  Author        : Frederick Barton
- *  Version       : 1.0.0
+ *  Version       : 2.0.0
  *  Last Updated  : 2026-03-21
- *  Environment   : Node.js 18+ / GitHub Actions
+ *  Environment   : Node.js 20+ / GitHub Actions
  *
  *  Change Log    :
+ *    2.0.0 - 2026-03-21
+ *        - Replaced header parsing with Claude API codebase analysis
+ *        - Generates full Confluence-ready Word document per project
+ *        - Reads all scripts in repo and sends to Claude for analysis
+ *        - Produces Purpose, Usage, Examples, Configuration, Change Log sections
  *    1.0.0 - 2026-03-21
- *        - Initial release
- *        - Parses PowerShell, Python, and JavaScript script headers
- *        - Generates formatted Word document in docs/ folder
- *        - Updates existing doc if already present for this script
+ *        - Initial release with header parsing approach
  *
  * -----------------------------------------------------------------------------
  *  PURPOSE:
  *    Triggered by GitHub Actions on minor/major version tag pushes.
- *    Finds all scripts in the repo, parses their structured headers,
- *    and generates (or updates) a Word document per script in docs/.
+ *    Reads all scripts in the repo, sends them to the Claude API for analysis,
+ *    and generates a Confluence-ready Word document saved to docs/.
  *
  *  USAGE:
- *    node Generate-Docs.js --version 1.2 --repo owner/repo --tag v1.2
+ *    node Generate-Docs.js --version 1.2 --repo FR-SEC/HL7-Parser --tag v1.2
  *
  * =============================================================================
  */
@@ -29,7 +31,7 @@
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
-  LevelFormat, Footer, Header, TabStopType, TabStopPosition,
+  LevelFormat, Footer, Header,
 } = require('docx');
 const fs   = require('fs');
 const path = require('path');
@@ -41,32 +43,19 @@ const args = {};
 process.argv.slice(2).forEach((a, i, arr) => {
   if (a.startsWith('--')) args[a.slice(2)] = arr[i + 1];
 });
-const VERSION = args.version || '1.0';
-const REPO    = args.repo    || '';
-const TAG     = args.tag     || `v${VERSION}`;
+const VERSION       = args.version || '1.0';
+const REPO          = args.repo    || '';
+const TAG           = args.tag     || `v${VERSION}`;
+const API_KEY       = process.env.ANTHROPIC_API_KEY || '';
+const PROJECT_NAME  = REPO.split('/').pop() || 'Project';
 
 // ---------------------------------------------------------------------------
-// Header section labels (order matters — used for display and parsing)
-// ---------------------------------------------------------------------------
-const PS_SECTIONS = [
-  'PURPOSE', 'CASE / PROJECT / TASK', 'ISSUE', 'CAUSE', 'SOLUTION',
-  'SCRIPT README (Quick Start)', 'OTHER INFORMATION',
-  'GOALS', 'MAJOR LOGIC CHOICES', 'CONFIGURATION OPTIONS',
-  'OUTPUTS', 'NOTES',
-];
-const PY_SECTIONS = ['PURPOSE', 'USAGE', 'DEPENDENCIES', 'NOTES'];
-const JS_SECTIONS = [
-  'PURPOSE', 'CASE / PROJECT / TASK', 'ISSUE', 'CAUSE', 'SOLUTION',
-  'USAGE / ENTRY POINT', 'DEPENDENCIES', 'INPUTS', 'OUTPUTS', 'NOTES',
-];
-
-// ---------------------------------------------------------------------------
-// Find all scripts in repo (exclude node_modules, .git, docs)
+// Find all scripts in repo
 // ---------------------------------------------------------------------------
 function findScripts(root) {
   const results = [];
   const exts    = ['.ps1', '.py', '.js'];
-  const skip    = new Set(['node_modules', '.git', 'docs', '.github']);
+  const skip    = new Set(['node_modules', '.git', 'docs', '.github', '__pycache__', 'dist', 'build']);
 
   function walk(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -83,124 +72,103 @@ function findScripts(root) {
 }
 
 // ---------------------------------------------------------------------------
-// Parse a script header into a structured object
+// Read script contents (cap at 50KB per file to stay within API limits)
 // ---------------------------------------------------------------------------
-function parseHeader(filePath) {
-  const ext     = path.extname(filePath).toLowerCase();
-  const content = fs.readFileSync(filePath, 'utf8');
-  const lines   = content.split('\n');
+function readScripts(scriptPaths, root) {
+  const MAX_BYTES = 50000;
+  return scriptPaths.map(p => {
+    const rel     = path.relative(root, p);
+    const content = fs.readFileSync(p, 'utf8').slice(0, MAX_BYTES);
+    return `=== FILE: ${rel} ===\n${content}`;
+  }).join('\n\n');
+}
 
-  const info = {
-    filePath,
-    fileName:    path.basename(filePath),
-    ext,
-    title:       '',
-    description: '',
-    author:      '',
-    version:     '',
-    lastUpdated: '',
-    validatedOn: '',
-    environment: '',
-    changeLog:   [],
-    sections:    {},
-  };
+// ---------------------------------------------------------------------------
+// Call Claude API to analyze codebase and generate documentation
+// ---------------------------------------------------------------------------
+async function generateDocContent(codeContent, projectName, version, repo) {
+  const prompt = `You are a technical writer analyzing a software project called "${projectName}" (version ${version}, repository: ${repo}).
 
-  // Determine comment style and section list
-  let inHeader  = false;
-  let inChanges = false;
-  let currentSection = null;
-  let sectionLines   = [];
-  let changeEntry    = null;
-  const sectionList  = ext === '.ps1' ? PS_SECTIONS
-                     : ext === '.py'  ? PY_SECTIONS
-                     : JS_SECTIONS;
+Analyze the following source code and generate comprehensive documentation suitable for a Confluence page. The documentation should be written for end users and administrators, not just developers.
 
-  for (let i = 0; i < lines.length; i++) {
-    const raw  = lines[i];
-    // Strip comment prefix for each language
-    let line = raw;
-    if (ext === '.ps1') line = raw.replace(/^\s*/, '');
-    if (ext === '.py')  line = raw.replace(/^#\s?/, '');
-    if (ext === '.js')  line = raw.replace(/^\s*\*\s?/, '').replace(/^\s*\/\*+/, '').replace(/\*+\/\s*$/, '');
+Generate documentation with EXACTLY these sections in this order, using these exact headings:
 
-    // Detect header start
-    if (!inHeader) {
-      if (line.includes('='.repeat(20))) { inHeader = true; continue; }
-      continue;
-    }
-    // Detect header end
-    if (line.includes('='.repeat(20)) && i > 5) break;
+# Overview
+A clear, concise description of what this application/script does and its primary purpose. Write 2-4 paragraphs.
 
-    // Metadata fields
-    const metaMatch = line.match(/^\s*([\w\s\/]+?)\s*:\s*(.+)/);
-    if (metaMatch && !currentSection) {
-      const key = metaMatch[1].trim();
-      const val = metaMatch[2].trim();
-      if      (key === 'Author')       info.author      = val;
-      else if (key === 'Version')      info.version     = val;
-      else if (key === 'Last Updated') info.lastUpdated = val;
-      else if (key === 'Validated on') info.validatedOn = val;
-      else if (key === 'Environment')  info.environment = val;
-      // Script title from first line after ===
-      continue;
-    }
+# Key Features
+List the main features and capabilities as bullet points.
 
-    // Title line (e.g. " ScriptName.ps1 — Description")
-    if (!info.title && line.match(/\s*\S+\.(ps1|py|js)\s*[—-]/i)) {
-      const parts = line.split(/[—-]/);
-      info.fileName   = parts[0].trim();
-      info.description = parts.slice(1).join('—').trim();
-      continue;
-    }
+# Requirements
+List system requirements, dependencies, and prerequisites.
 
-    // Change Log entries
-    if (line.trim() === 'Change Log    :' || line.trim() === 'Change Log:') {
-      inChanges = true; continue;
-    }
-    if (inChanges && !currentSection) {
-      const versionLine = line.match(/^\s*([\d.]+)\s*-\s*(\d{4}-\d{2}-\d{2})/);
-      if (versionLine) {
-        if (changeEntry) info.changeLog.push(changeEntry);
-        changeEntry = { version: versionLine[1], date: versionLine[2], items: [] };
-        continue;
-      }
-      if (changeEntry && line.trim().startsWith('-')) {
-        changeEntry.items.push(line.replace(/^\s*-\s*/, '').trim());
-        continue;
-      }
-      if (changeEntry && line.trim().startsWith('*')) {
-        // Sub-bullet — append to last item
-        if (changeEntry.items.length) {
-          changeEntry.items[changeEntry.items.length - 1] += ' ' + line.replace(/^\s*\*\s*/, '').trim();
-        }
-        continue;
-      }
-    }
+# Installation & Setup
+Step-by-step installation and configuration instructions.
 
-    // Section headers (e.g. " PURPOSE:", " GOALS:")
-    const sectionMatch = sectionList.find(s => line.trim().toUpperCase().startsWith(s.toUpperCase() + ':')
-                                            || line.trim().toUpperCase() === s.toUpperCase() + ':');
-    if (sectionMatch) {
-      if (currentSection) info.sections[currentSection] = sectionLines.join('\n').trim();
-      // Save any pending changeLog entry when first section starts
-      if (changeEntry) { info.changeLog.push(changeEntry); changeEntry = null; inChanges = false; }
-      currentSection = sectionMatch;
-      sectionLines   = [];
-      continue;
-    }
+# Usage
+How to use the application/script, including command-line arguments, GUI instructions, or API usage as appropriate.
 
-    // Divider lines — skip
-    if (line.trim().startsWith('-'.repeat(10))) continue;
+# Configuration
+All configuration options, parameters, and settings with descriptions.
 
-    // Accumulate section content
-    if (currentSection) sectionLines.push(line.replace(/^\s{1,3}/, ''));
+# Examples
+Practical, real-world examples of how to use this application/script.
+
+# Known Limitations
+Any known limitations, edge cases, or things the application does not support.
+
+# Change Log
+A summary of what changed in version ${version} based on any change log information found in the code headers.
+
+Write in a clear, professional style. Use specific details from the code — real function names, actual parameters, true behavior. Do not be vague or generic. If the code is a GUI application describe the interface. If it is a CLI tool describe the commands. If it processes specific file formats or data types, name them explicitly.
+
+Here is the source code to analyze:
+
+${codeContent}`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type':         'application/json',
+      'x-api-key':            API_KEY,
+      'anthropic-version':    '2023-06-01',
+    },
+    body: JSON.stringify({
+      model:      'claude-sonnet-4-20250514',
+      max_tokens: 4000,
+      messages:   [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Claude API error ${response.status}: ${err}`);
   }
 
-  // Flush last section
-  if (currentSection) info.sections[currentSection] = sectionLines.join('\n').trim();
-  if (changeEntry)    info.changeLog.push(changeEntry);
+  const data = await response.json();
+  return data.content[0].text;
+}
 
-  return info;
+// ---------------------------------------------------------------------------
+// Parse Claude's markdown response into sections
+// ---------------------------------------------------------------------------
+function parseMarkdownSections(markdown) {
+  const sections = {};
+  let currentSection = null;
+  let currentLines   = [];
+
+  for (const line of markdown.split('\n')) {
+    const h1 = line.match(/^#\s+(.+)/);
+    if (h1) {
+      if (currentSection) sections[currentSection] = currentLines.join('\n').trim();
+      currentSection = h1[1].trim();
+      currentLines   = [];
+    } else {
+      if (currentSection) currentLines.push(line);
+    }
+  }
+  if (currentSection) sections[currentSection] = currentLines.join('\n').trim();
+  return sections;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,8 +179,6 @@ const BLUE_LIGHT = 'D5E8F0';
 const GRAY_LIGHT = 'F5F5F5';
 const border     = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
 const borders    = { top: border, bottom: border, left: border, right: border };
-const noBorder   = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
-const noBorders  = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };
 
 function heading1(text) {
   return new Paragraph({
@@ -231,9 +197,9 @@ function heading2(text) {
   });
 }
 
-function bodyText(text, opts = {}) {
+function bodyText(text) {
   return new Paragraph({
-    children: [new TextRun({ text, size: 22, font: 'Arial', ...opts })],
+    children: [new TextRun({ text, size: 22, font: 'Arial' })],
     spacing: { after: 80 },
   });
 }
@@ -241,139 +207,117 @@ function bodyText(text, opts = {}) {
 function bulletPara(text, level = 0) {
   return new Paragraph({
     numbering: { reference: 'bullets', level },
-    children: [new TextRun({ text, size: 22, font: 'Arial' })],
-    spacing: { after: 60 },
+    children:  [new TextRun({ text, size: 22, font: 'Arial' })],
+    spacing:   { after: 60 },
   });
 }
 
-function sectionContent(text) {
+function numberedPara(text, level = 0) {
+  return new Paragraph({
+    numbering: { reference: 'numbers', level },
+    children:  [new TextRun({ text, size: 22, font: 'Arial' })],
+    spacing:   { after: 60 },
+  });
+}
+
+function codeBlock(text) {
+  return new Paragraph({
+    children: [new TextRun({ text, size: 20, font: 'Courier New', color: '333333' })],
+    spacing:  { after: 60 },
+    shading:  { fill: 'F0F0F0', type: ShadingType.CLEAR },
+    indent:   { left: 720 },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Convert markdown text block to Word paragraphs
+// ---------------------------------------------------------------------------
+function markdownToParas(text) {
   if (!text) return [bodyText('—')];
-  const paras = [];
+  const paras   = [];
+  let inCode    = false;
+  let codeLines = [];
+
   for (const line of text.split('\n')) {
-    const stripped = line.trimEnd();
-    if (!stripped) { paras.push(new Paragraph({ spacing: { after: 40 } })); continue; }
-    const indent = line.match(/^\s*/)[0].length;
-    if (stripped.trimStart().startsWith('* ')) {
-      paras.push(bulletPara(stripped.trimStart().slice(2), 1));
-    } else if (stripped.trimStart().startsWith('- ') || stripped.trimStart().match(/^\d+\)/)) {
-      paras.push(bulletPara(stripped.trimStart().replace(/^[-\d]+[.)]\s*/, ''), indent > 2 ? 1 : 0));
-    } else {
-      paras.push(bodyText(stripped.trimStart()));
+    // Code fence
+    if (line.trim().startsWith('```')) {
+      if (inCode) {
+        codeLines.forEach(l => paras.push(codeBlock(l)));
+        codeLines = [];
+        inCode    = false;
+      } else {
+        inCode = true;
+      }
+      continue;
     }
+    if (inCode) { codeLines.push(line); continue; }
+
+    // Blank line
+    if (!line.trim()) { paras.push(new Paragraph({ spacing: { after: 40 } })); continue; }
+
+    // Numbered list
+    const numMatch = line.match(/^\s*(\d+)\.\s+(.+)/);
+    if (numMatch) { paras.push(numberedPara(numMatch[2].trim())); continue; }
+
+    // Bullet list (-, *, •)
+    const bulMatch = line.match(/^\s*[-*•]\s+(.+)/);
+    if (bulMatch) {
+      const indent = line.match(/^\s*/)[0].length;
+      paras.push(bulletPara(bulMatch[1].trim(), indent >= 4 ? 1 : 0));
+      continue;
+    }
+
+    // Inline code — strip backticks for Word
+    const cleaned = line.replace(/`([^`]+)`/g, '$1').trim();
+    // Bold — strip ** for Word
+    const stripped = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+    paras.push(bodyText(stripped));
   }
+
+  // Flush unclosed code block
+  if (codeLines.length) codeLines.forEach(l => paras.push(codeBlock(l)));
+
   return paras;
-}
-
-// ---------------------------------------------------------------------------
-// Change log table
-// ---------------------------------------------------------------------------
-function changeLogTable(changeLog) {
-  if (!changeLog.length) return [];
-
-  const headerRow = new TableRow({
-    children: [
-      new TableCell({
-        borders, width: { size: 1440, type: WidthType.DXA },
-        shading: { fill: BLUE, type: ShadingType.CLEAR },
-        margins: { top: 80, bottom: 80, left: 120, right: 120 },
-        children: [new Paragraph({ children: [new TextRun({ text: 'Version', bold: true, color: 'FFFFFF', size: 22, font: 'Arial' })] })],
-      }),
-      new TableCell({
-        borders, width: { size: 1440, type: WidthType.DXA },
-        shading: { fill: BLUE, type: ShadingType.CLEAR },
-        margins: { top: 80, bottom: 80, left: 120, right: 120 },
-        children: [new Paragraph({ children: [new TextRun({ text: 'Date', bold: true, color: 'FFFFFF', size: 22, font: 'Arial' })] })],
-      }),
-      new TableCell({
-        borders, width: { size: 6480, type: WidthType.DXA },
-        shading: { fill: BLUE, type: ShadingType.CLEAR },
-        margins: { top: 80, bottom: 80, left: 120, right: 120 },
-        children: [new Paragraph({ children: [new TextRun({ text: 'Changes', bold: true, color: 'FFFFFF', size: 22, font: 'Arial' })] })],
-      }),
-    ],
-  });
-
-  const dataRows = changeLog.map((entry, idx) =>
-    new TableRow({
-      children: [
-        new TableCell({
-          borders, width: { size: 1440, type: WidthType.DXA },
-          shading: { fill: idx % 2 === 0 ? GRAY_LIGHT : 'FFFFFF', type: ShadingType.CLEAR },
-          margins: { top: 80, bottom: 80, left: 120, right: 120 },
-          children: [new Paragraph({ children: [new TextRun({ text: entry.version, size: 22, font: 'Arial' })] })],
-        }),
-        new TableCell({
-          borders, width: { size: 1440, type: WidthType.DXA },
-          shading: { fill: idx % 2 === 0 ? GRAY_LIGHT : 'FFFFFF', type: ShadingType.CLEAR },
-          margins: { top: 80, bottom: 80, left: 120, right: 120 },
-          children: [new Paragraph({ children: [new TextRun({ text: entry.date, size: 22, font: 'Arial' })] })],
-        }),
-        new TableCell({
-          borders, width: { size: 6480, type: WidthType.DXA },
-          shading: { fill: idx % 2 === 0 ? GRAY_LIGHT : 'FFFFFF', type: ShadingType.CLEAR },
-          margins: { top: 80, bottom: 80, left: 120, right: 120 },
-          children: entry.items.map(item => new Paragraph({
-            numbering: { reference: 'bullets', level: 0 },
-            children: [new TextRun({ text: item, size: 22, font: 'Arial' })],
-            spacing: { after: 40 },
-          })),
-        }),
-      ],
-    })
-  );
-
-  return [
-    heading2('Change Log'),
-    new Table({
-      width: { size: 9360, type: WidthType.DXA },
-      columnWidths: [1440, 1440, 6480],
-      rows: [headerRow, ...dataRows],
-    }),
-    new Paragraph({ spacing: { after: 200 } }),
-  ];
 }
 
 // ---------------------------------------------------------------------------
 // Cover page
 // ---------------------------------------------------------------------------
-function coverPage(info, repoName) {
+function coverPage(projectName, version, repo, tag) {
   return [
-    new Paragraph({ spacing: { before: 1440, after: 80 } }), // top padding
+    new Paragraph({ spacing: { before: 1440, after: 80 } }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: info.fileName, bold: true, size: 56, font: 'Arial', color: BLUE })],
-      spacing: { after: 160 },
+      children:  [new TextRun({ text: projectName, bold: true, size: 56, font: 'Arial', color: BLUE })],
+      spacing:   { after: 160 },
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: info.description || 'Script Documentation', size: 32, font: 'Arial', color: '606060' })],
-      spacing: { after: 480 },
+      children:  [new TextRun({ text: 'Application Documentation', size: 32, font: 'Arial', color: '606060' })],
+      spacing:   { after: 480 },
     }),
-    // Metadata table
     new Table({
-      width: { size: 6480, type: WidthType.DXA },
+      width:        { size: 6480, type: WidthType.DXA },
       columnWidths: [2160, 4320],
       rows: [
-        ['Author',      info.author      || 'Frederick Barton'],
-        ['Version',     info.version     || VERSION],
-        ['Last Updated', info.lastUpdated || new Date().toISOString().slice(0, 10)],
-        ['Repository',  repoName         || ''],
-        ['Tag',         TAG],
-        [info.ext === '.ps1' ? 'Validated on' : 'Environment',
-         info.validatedOn || info.environment || ''],
-      ].filter(r => r[1]).map(([label, value], idx) =>
+        ['Author',     'Frederick Barton'],
+        ['Version',    version],
+        ['Generated',  new Date().toISOString().slice(0, 10)],
+        ['Repository', repo],
+        ['Tag',        tag],
+      ].map(([label, value], idx) =>
         new TableRow({
           children: [
             new TableCell({
               borders, width: { size: 2160, type: WidthType.DXA },
-              shading: { fill: BLUE_LIGHT, type: ShadingType.CLEAR },
-              margins: { top: 80, bottom: 80, left: 120, right: 120 },
+              shading:  { fill: BLUE_LIGHT, type: ShadingType.CLEAR },
+              margins:  { top: 80, bottom: 80, left: 120, right: 120 },
               children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 22, font: 'Arial', color: '404040' })] })],
             }),
             new TableCell({
               borders, width: { size: 4320, type: WidthType.DXA },
-              shading: { fill: idx % 2 === 0 ? GRAY_LIGHT : 'FFFFFF', type: ShadingType.CLEAR },
-              margins: { top: 80, bottom: 80, left: 120, right: 120 },
+              shading:  { fill: idx % 2 === 0 ? GRAY_LIGHT : 'FFFFFF', type: ShadingType.CLEAR },
+              margins:  { top: 80, bottom: 80, left: 120, right: 120 },
               children: [new Paragraph({ children: [new TextRun({ text: value, size: 22, font: 'Arial' })] })],
             }),
           ],
@@ -385,49 +329,24 @@ function coverPage(info, repoName) {
 }
 
 // ---------------------------------------------------------------------------
-// Build full document for one script
+// Build full document
 // ---------------------------------------------------------------------------
-function buildDocument(info, repoName) {
-  const sectionList = info.ext === '.ps1' ? PS_SECTIONS
-                    : info.ext === '.py'  ? PY_SECTIONS
-                    : JS_SECTIONS;
-
-  // Friendly display labels
-  const sectionLabels = {
-    'PURPOSE':                   'Purpose',
-    'CASE / PROJECT / TASK':     'Case / Project / Task',
-    'ISSUE':                     'Issue',
-    'CAUSE':                     'Cause',
-    'SOLUTION':                  'Solution',
-    'SCRIPT README (Quick Start)':'Quick Start Guide',
-    'OTHER INFORMATION':         'Other Information',
-    'GOALS':                     'Goals',
-    'MAJOR LOGIC CHOICES':       'Major Logic Choices',
-    'CONFIGURATION OPTIONS':     'Configuration Options',
-    'OUTPUTS':                   'Outputs',
-    'NOTES':                     'Notes',
-    'USAGE':                     'Usage',
-    'USAGE / ENTRY POINT':       'Usage / Entry Point',
-    'DEPENDENCIES':              'Dependencies',
-    'INPUTS':                    'Inputs',
-  };
+function buildDocument(projectName, version, repo, tag, sections) {
+  const sectionOrder = [
+    'Overview', 'Key Features', 'Requirements',
+    'Installation & Setup', 'Usage', 'Configuration',
+    'Examples', 'Known Limitations', 'Change Log',
+  ];
 
   const children = [
-    ...coverPage(info, repoName),
-    // Page break before main content
-    new Paragraph({ children: [new TextRun({ break: 1 })], pageBreakBefore: true }),
-    heading1('Overview'),
-    bodyText(info.description || ''),
-    new Paragraph({ spacing: { after: 160 } }),
-    ...changeLogTable(info.changeLog),
-    heading1('Documentation'),
-    ...sectionList.flatMap(s => {
-      const content = info.sections[s];
-      if (!content && s === 'CASE / PROJECT / TASK') return [];
+    ...coverPage(projectName, version, repo, tag),
+    new Paragraph({ pageBreakBefore: true, spacing: { after: 0 } }),
+    ...sectionOrder.flatMap(title => {
+      const content = sections[title];
       return [
-        heading2(sectionLabels[s] || s),
-        ...sectionContent(content || ''),
-        new Paragraph({ spacing: { after: 120 } }),
+        heading1(title),
+        ...markdownToParas(content || ''),
+        new Paragraph({ spacing: { after: 160 } }),
       ];
     }),
   ];
@@ -435,15 +354,16 @@ function buildDocument(info, repoName) {
   return new Document({
     numbering: {
       config: [
-        {
-          reference: 'bullets',
-          levels: [
-            { level: 0, format: LevelFormat.BULLET, text: '\u2022', alignment: AlignmentType.LEFT,
-              style: { paragraph: { indent: { left: 720, hanging: 360 } } } },
-            { level: 1, format: LevelFormat.BULLET, text: '\u25E6', alignment: AlignmentType.LEFT,
-              style: { paragraph: { indent: { left: 1080, hanging: 360 } } } },
-          ],
-        },
+        { reference: 'bullets', levels: [
+          { level: 0, format: LevelFormat.BULLET, text: '\u2022', alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 720, hanging: 360 } } } },
+          { level: 1, format: LevelFormat.BULLET, text: '\u25E6', alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 1080, hanging: 360 } } } },
+        ]},
+        { reference: 'numbers', levels: [
+          { level: 0, format: LevelFormat.DECIMAL, text: '%1.', alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 720, hanging: 360 } } } },
+        ]},
       ],
     },
     styles: {
@@ -460,36 +380,30 @@ function buildDocument(info, repoName) {
     sections: [{
       properties: {
         page: {
-          size: { width: 12240, height: 15840 },
+          size:   { width: 12240, height: 15840 },
           margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
         },
       },
       headers: {
         default: new Header({
-          children: [
-            new Paragraph({
-              children: [
-                new TextRun({ text: `${info.fileName}  `, size: 18, font: 'Arial', color: '808080' }),
-                new TextRun({ text: `v${info.version || VERSION}`, size: 18, font: 'Arial', color: BLUE }),
-              ],
-              border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: BLUE_LIGHT, space: 1 } },
-            }),
-          ],
+          children: [new Paragraph({
+            children: [
+              new TextRun({ text: `${projectName}  `, size: 18, font: 'Arial', color: '808080' }),
+              new TextRun({ text: `v${version}`, size: 18, font: 'Arial', color: BLUE }),
+            ],
+            border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: BLUE_LIGHT, space: 1 } },
+          })],
         }),
       },
       footers: {
         default: new Footer({
-          children: [
-            new Paragraph({
-              children: [
-                new TextRun({ text: 'Frederick Barton  |  ', size: 18, font: 'Arial', color: '808080' }),
-                new TextRun({ text: `Generated ${new Date().toISOString().slice(0, 10)}`, size: 18, font: 'Arial', color: '808080' }),
-                new TextRun({ children: [{ type: 'PAGE' }], size: 18, font: 'Arial', color: '808080' }),
-              ],
-              alignment: AlignmentType.RIGHT,
-              border: { top: { style: BorderStyle.SINGLE, size: 4, color: BLUE_LIGHT, space: 1 } },
-            }),
-          ],
+          children: [new Paragraph({
+            children: [
+              new TextRun({ text: `Frederick Barton  |  Generated ${new Date().toISOString().slice(0, 10)}`, size: 18, font: 'Arial', color: '808080' }),
+            ],
+            alignment: AlignmentType.RIGHT,
+            border: { top: { style: BorderStyle.SINGLE, size: 4, color: BLUE_LIGHT, space: 1 } },
+          })],
         }),
       },
       children,
@@ -501,27 +415,40 @@ function buildDocument(info, repoName) {
 // Main
 // ---------------------------------------------------------------------------
 (async () => {
+  if (!API_KEY) { console.error('ERROR: ANTHROPIC_API_KEY not set'); process.exit(1); }
+
   const repoRoot = process.cwd();
   const docsDir  = path.join(repoRoot, 'docs');
   if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
 
-  const scripts = findScripts(repoRoot);
-  console.log(`Found ${scripts.length} script(s)`);
+  console.log(`Analyzing ${PROJECT_NAME} v${VERSION}...`);
 
-  for (const scriptPath of scripts) {
-    try {
-      const info    = parseHeader(scriptPath);
-      const docName = path.basename(scriptPath, path.extname(scriptPath)) + '.docx';
-      const docPath = path.join(docsDir, docName);
+  // Collect all scripts
+  const scripts     = findScripts(repoRoot);
+  console.log(`Found ${scripts.length} script(s) to analyze`);
 
-      const doc    = buildDocument(info, REPO);
-      const buffer = await Packer.toBuffer(doc);
-      fs.writeFileSync(docPath, buffer);
-
-      const action = fs.existsSync(docPath) ? 'Updated' : 'Created';
-      console.log(`${action}: ${docPath}`);
-    } catch (err) {
-      console.error(`Error processing ${scriptPath}: ${err.message}`);
-    }
+  if (scripts.length === 0) {
+    console.log('No scripts found — skipping doc generation');
+    return;
   }
+
+  // Read script contents
+  const codeContent = readScripts(scripts, repoRoot);
+  console.log(`Sending ${Math.round(codeContent.length / 1024)}KB to Claude API...`);
+
+  // Call Claude API
+  const markdown = await generateDocContent(codeContent, PROJECT_NAME, VERSION, REPO);
+  console.log('Claude API response received');
+
+  // Parse sections
+  const sections = parseMarkdownSections(markdown);
+  console.log(`Parsed sections: ${Object.keys(sections).join(', ')}`);
+
+  // Build Word document
+  const doc     = buildDocument(PROJECT_NAME, VERSION, REPO, TAG, sections);
+  const buffer  = await Packer.toBuffer(doc);
+  const docPath = path.join(docsDir, `${PROJECT_NAME}.docx`);
+  fs.writeFileSync(docPath, buffer);
+
+  console.log(`Generated: ${docPath}`);
 })();
