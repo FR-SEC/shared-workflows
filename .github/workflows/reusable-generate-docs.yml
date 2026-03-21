@@ -35,7 +35,7 @@ jobs:
 
       - name: Install docx package
         run: npm install docx
-        working-directory: _shared
+        working-directory: _shared/.github/workflows/scripts
 
       - name: Create docs folder if needed
         shell: pwsh
@@ -47,7 +47,7 @@ jobs:
       - name: Generate Word documents
         shell: pwsh
         run: |
-          node _shared/scripts/Generate-Docs.js `
+          node _shared/.github/workflows/scripts/Generate-Docs.js `
             --version "${{ inputs.version }}" `
             --repo "${{ github.repository }}" `
             --tag "${{ inputs.tag }}"
