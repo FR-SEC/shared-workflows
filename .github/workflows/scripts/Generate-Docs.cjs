@@ -146,7 +146,7 @@ Use the CHANGELOG.md file (if present) as the authoritative source. Include all 
 # Roadmap
 If ROADMAP.md exists, include planned features. If empty or absent, state "No planned features at this time."
 
-Write in a clear, professional, authoritative style. Every statement must be grounded in the actual source material provided. Do not invent features, fabricate examples, or include placeholder text. If a section has limited information, keep it short rather than padding with generic content.
+Write in a clear, factual, understated tone. This is internal technical documentation, not a product brochure. State what the tool does plainly — do not use superlatives, marketing language, or promotional phrasing. Avoid words like "powerful", "comprehensive", "robust", "seamless", "excels", "cutting-edge", "smart", "intelligent", or "optimized". Do not editorialize about the tool's value or quality — let the reader decide. Every statement must be grounded in the actual source material provided. Do not invent features, fabricate examples, or include placeholder text. If a section has limited information, keep it short rather than padding with generic content.
 
 Here is the project content:
 
