@@ -3,11 +3,22 @@
  *  Generate-Docs.js — AI-powered Word document generator for Confluence
  *
  *  Author        : Frederick Barton
- *  Version       : 2.1.0
+ *  Version       : 2.2.0
  *  Last Updated  : 2026-03-30
  *  Environment   : Node.js 20+ / GitHub Actions
  *
  *  Change Log    :
+ *    2.2.0 - 2026-03-30
+ *        - Improved documentation quality:
+ *          * max_tokens raised from 4000 to 16000 (was truncating output)
+ *          * Now reads .md files (CHANGELOG, CLAUDE, ROADMAP, APP_INFO) as
+ *            first-class sources, not just script code
+ *          * Per-file read cap raised from 50KB to 80KB
+ *          * Prompt rewritten: demands specific, grounded content from all
+ *            project files; added Architecture and Roadmap sections;
+ *            Change Log now uses CHANGELOG.md as authoritative source
+ *          * Added Architecture and Roadmap sections to document structure
+ *
  *    2.1.0 - 2026-03-30
  *        - Applied Sectra SPX / DOC_STYLE.md brand tokens to all styles:
  *          Blue-500 (#3C73BB) for H1, Asphalt-500 (#1E3A5F) for H2/cover
@@ -63,8 +74,8 @@ const PROJECT_NAME  = REPO.split('/').pop() || 'Project';
 // ---------------------------------------------------------------------------
 function findScripts(root) {
   const results = [];
-  const exts    = ['.ps1', '.py', '.js'];
-  const skip    = new Set(['node_modules', '.git', 'docs', '.github', '__pycache__', 'dist', 'build']);
+  const exts    = ['.ps1', '.py', '.js', '.md', '.txt'];
+  const skip    = new Set(['node_modules', '.git', 'docs', '.github', '__pycache__', 'dist', 'build', 'Output', 'icons']);
 
   function walk(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -84,7 +95,7 @@ function findScripts(root) {
 // Read script contents (cap at 50KB per file to stay within API limits)
 // ---------------------------------------------------------------------------
 function readScripts(scriptPaths, root) {
-  const MAX_BYTES = 50000;
+  const MAX_BYTES = 80000;
   return scriptPaths.map(p => {
     const rel     = path.relative(root, p);
     const content = fs.readFileSync(p, 'utf8').slice(0, MAX_BYTES);
@@ -96,42 +107,48 @@ function readScripts(scriptPaths, root) {
 // Call Claude API to analyze codebase and generate documentation
 // ---------------------------------------------------------------------------
 async function generateDocContent(codeContent, projectName, version, repo) {
-  const prompt = `You are a technical writer analyzing a software project called "${projectName}" (version ${version}, repository: ${repo}).
+  const prompt = `You are a senior technical writer producing professional Confluence documentation for "${projectName}" (version ${version}, repository: ${repo}).
 
-Analyze the following source code and generate comprehensive documentation suitable for a Confluence page. The documentation should be written for end users and administrators, not just developers.
+You have been given the complete project source code AND supporting documentation files (APP_INFO.md, CHANGELOG.md, CLAUDE.md, ROADMAP.md, etc.). Use ALL of these sources — the markdown files contain authoritative information about the project's purpose, architecture, workflow, and change history that may not be obvious from the code alone.
 
 Generate documentation with EXACTLY these sections in this order, using these exact headings:
 
 # Overview
-A clear, concise description of what this application/script does and its primary purpose. Write 2-4 paragraphs.
+What this project does, who it is for, and why it exists. Write 3-5 substantive paragraphs covering the problem it solves, how it works at a high level, and what makes it valuable. Use specific details from APP_INFO.md and CLAUDE.md — do not write generic filler.
 
 # Key Features
-List the main features and capabilities as bullet points.
+Bullet points with bold feature names and concise descriptions. Derive from actual code capabilities and APP_INFO.md feature list.
+
+# Architecture
+How the application is structured internally. Cover the major components, data flow, and key design decisions. Reference CLAUDE.md for architectural details. Include a description of the output format/structure if the application produces files.
 
 # Requirements
-List system requirements, dependencies, and prerequisites.
+System requirements, dependencies, and prerequisites. Be specific about versions.
 
 # Installation & Setup
-Step-by-step installation and configuration instructions.
+Step-by-step instructions from first download through first successful run. Include execution policy, certificate, and credential setup if applicable.
 
 # Usage
-How to use the application/script, including command-line arguments, GUI instructions, or API usage as appropriate.
+Complete usage instructions with actual command examples. Cover first run, subsequent runs, all parameters and options. If there is a multi-step workflow (e.g. run on multiple servers then compare), document the full end-to-end process.
 
 # Configuration
-All configuration options, parameters, and settings with descriptions.
+All configuration options with descriptions, default values, and valid ranges. Organize by category if applicable.
 
 # Examples
-Practical, real-world examples of how to use this application/script.
+3-5 real-world usage scenarios with actual commands and expected output. Not generic — use real parameter values and realistic context.
 
 # Known Limitations
-Any known limitations, edge cases, or things the application does not support.
+Specific, honest limitations derived from the code. Not generic caveats.
 
 # Change Log
-A summary of what changed in version ${version} based on any change log information found in the code headers.
+Use the CHANGELOG.md file (if present) as the authoritative source. Include all versions with their changes, not just the current version. Format each version as a subsection.
 
-Write in a clear, professional style. Use specific details from the code — real function names, actual parameters, true behavior. Do not be vague or generic. If the code is a GUI application describe the interface. If it is a CLI tool describe the commands. If it processes specific file formats or data types, name them explicitly.
+# Roadmap
+If ROADMAP.md exists, include planned features. If empty or absent, state "No planned features at this time."
 
-Here is the source code to analyze:
+Write in a clear, professional, authoritative style. Every statement must be grounded in the actual source material provided. Do not invent features, fabricate examples, or include placeholder text. If a section has limited information, keep it short rather than padding with generic content.
+
+Here is the project content:
 
 ${codeContent}`;
 
@@ -144,7 +161,7 @@ ${codeContent}`;
     },
     body: JSON.stringify({
       model:      'claude-sonnet-4-20250514',
-      max_tokens: 4000,
+      max_tokens: 16000,
       messages:   [{ role: 'user', content: prompt }],
     }),
   });
@@ -366,9 +383,10 @@ function coverPage(projectName, version, repo, tag) {
 // ---------------------------------------------------------------------------
 function buildDocument(projectName, version, repo, tag, sections) {
   const sectionOrder = [
-    'Overview', 'Key Features', 'Requirements',
-    'Installation & Setup', 'Usage', 'Configuration',
-    'Examples', 'Known Limitations', 'Change Log',
+    'Overview', 'Key Features', 'Architecture',
+    'Requirements', 'Installation & Setup', 'Usage',
+    'Configuration', 'Examples', 'Known Limitations',
+    'Change Log', 'Roadmap',
   ];
 
   const children = [
