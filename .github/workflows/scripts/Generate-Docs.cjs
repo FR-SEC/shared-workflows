@@ -3,11 +3,20 @@
  *  Generate-Docs.js — AI-powered Word document generator for Confluence
  *
  *  Author        : Frederick Barton
- *  Version       : 2.0.0
- *  Last Updated  : 2026-03-21
+ *  Version       : 2.1.0
+ *  Last Updated  : 2026-03-30
  *  Environment   : Node.js 20+ / GitHub Actions
  *
  *  Change Log    :
+ *    2.1.0 - 2026-03-30
+ *        - Applied Sectra SPX / DOC_STYLE.md brand tokens to all styles:
+ *          Blue-500 (#3C73BB) for H1, Asphalt-500 (#1E3A5F) for H2/cover
+ *          Times New Roman 11pt body, Silver palette for tables/borders
+ *        - Cover page: Asphalt-500 full-width colour bar with Silver-50 text
+ *        - Table headers: Blue-500 background, Silver-50 text
+ *        - Code blocks: Silver-100 background, Silver-400 borders
+ *        - Footer/header borders updated to Silver-400
+ *
  *    2.0.0 - 2026-03-21
  *        - Replaced header parsing with Claude API codebase analysis
  *        - Generates full Confluence-ready Word document per project
@@ -172,42 +181,45 @@ function parseMarkdownSections(markdown) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared styles
+// Shared styles — Sectra SPX / DOC_STYLE.md tokens
 // ---------------------------------------------------------------------------
-const BLUE       = '2E75B6';
-const BLUE_LIGHT = 'D5E8F0';
-const GRAY_LIGHT = 'F5F5F5';
-const border     = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
-const borders    = { top: border, bottom: border, left: border, right: border };
+const BLUE_500     = '3C73BB';  // Heading 1, table headers, hyperlinks, accent rules
+const ASPHALT_500  = '1E3A5F';  // Heading 2, cover page bar, footer background
+const ASPHALT_900  = '071326';  // Body text, darkest text
+const SILVER_50    = 'F7F9FC';  // Text on dark backgrounds (cover page, table headers)
+const SILVER_100   = 'EEF2F7';  // Table even rows, code block background
+const SILVER_400   = 'C9D3DE';  // Table borders, horizontal rules
+const border       = { style: BorderStyle.SINGLE, size: 1, color: SILVER_400 };
+const borders      = { top: border, bottom: border, left: border, right: border };
 
 function heading1(text) {
   return new Paragraph({
     heading: HeadingLevel.HEADING_1,
-    children: [new TextRun({ text, bold: true, size: 32, font: 'Arial', color: BLUE })],
-    spacing: { before: 360, after: 120 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: BLUE, space: 1 } },
+    children: [new TextRun({ text, bold: true, size: 36, font: 'Arial', color: BLUE_500 })],
+    spacing: { before: 480, after: 240 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: BLUE_500, space: 1 } },
   });
 }
 
 function heading2(text) {
   return new Paragraph({
     heading: HeadingLevel.HEADING_2,
-    children: [new TextRun({ text, bold: true, size: 26, font: 'Arial', color: '404040' })],
-    spacing: { before: 240, after: 80 },
+    children: [new TextRun({ text, bold: true, size: 28, font: 'Arial', color: ASPHALT_500 })],
+    spacing: { before: 360, after: 180 },
   });
 }
 
 function bodyText(text) {
   return new Paragraph({
-    children: [new TextRun({ text, size: 22, font: 'Arial' })],
-    spacing: { after: 80 },
+    children: [new TextRun({ text, size: 22, font: 'Times New Roman', color: ASPHALT_900 })],
+    spacing: { after: 160, line: 276 },  // 1.15 line spacing = 276 twips
   });
 }
 
 function bulletPara(text, level = 0) {
   return new Paragraph({
     numbering: { reference: 'bullets', level },
-    children:  [new TextRun({ text, size: 22, font: 'Arial' })],
+    children:  [new TextRun({ text, size: 22, font: 'Times New Roman', color: ASPHALT_900 })],
     spacing:   { after: 60 },
   });
 }
@@ -215,17 +227,21 @@ function bulletPara(text, level = 0) {
 function numberedPara(text, level = 0) {
   return new Paragraph({
     numbering: { reference: 'numbers', level },
-    children:  [new TextRun({ text, size: 22, font: 'Arial' })],
+    children:  [new TextRun({ text, size: 22, font: 'Times New Roman', color: ASPHALT_900 })],
     spacing:   { after: 60 },
   });
 }
 
 function codeBlock(text) {
   return new Paragraph({
-    children: [new TextRun({ text, size: 20, font: 'Courier New', color: '333333' })],
-    spacing:  { after: 60 },
-    shading:  { fill: 'F0F0F0', type: ShadingType.CLEAR },
+    children: [new TextRun({ text, size: 20, font: 'Courier New', color: ASPHALT_900 })],
+    spacing:  { before: 40, after: 40 },
+    shading:  { fill: SILVER_100, type: ShadingType.CLEAR },
     indent:   { left: 720 },
+    border: {
+      top:    { style: BorderStyle.SINGLE, size: 1, color: SILVER_400, space: 1 },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: SILVER_400, space: 1 },
+    },
   });
 }
 
@@ -285,40 +301,57 @@ function markdownToParas(text) {
 // ---------------------------------------------------------------------------
 function coverPage(projectName, version, repo, tag) {
   return [
-    new Paragraph({ spacing: { before: 1440, after: 80 } }),
+    // Asphalt-500 colour bar with title and subtitle in Silver-50
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children:  [new TextRun({ text: projectName, bold: true, size: 56, font: 'Arial', color: BLUE })],
-      spacing:   { after: 160 },
+      shading:   { fill: ASPHALT_500, type: ShadingType.CLEAR },
+      children:  [new TextRun({ text: ' ', size: 24 })],
+      spacing:   { before: 0, after: 0 },
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children:  [new TextRun({ text: 'Application Documentation', size: 32, font: 'Arial', color: '606060' })],
+      shading:   { fill: ASPHALT_500, type: ShadingType.CLEAR },
+      children:  [new TextRun({ text: projectName, bold: true, size: 48, font: 'Arial', color: SILVER_50 })],
+      spacing:   { before: 480, after: 160 },
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      shading:   { fill: ASPHALT_500, type: ShadingType.CLEAR },
+      children:  [new TextRun({ text: 'Application Documentation', size: 28, font: 'Arial', color: SILVER_50 })],
       spacing:   { after: 480 },
     }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      shading:   { fill: ASPHALT_500, type: ShadingType.CLEAR },
+      children:  [new TextRun({ text: ' ', size: 24 })],
+      spacing:   { after: 0 },
+    }),
+    new Paragraph({ spacing: { before: 480, after: 80 } }),
+    // Metadata table
     new Table({
       width:        { size: 6480, type: WidthType.DXA },
       columnWidths: [2160, 4320],
       rows: [
-        ['Author',     'Frederick Barton'],
-        ['Version',    version],
-        ['Generated',  new Date().toISOString().slice(0, 10)],
-        ['Repository', repo],
-        ['Tag',        tag],
+        ['Document Title', `${projectName} Documentation`],
+        ['Version',        version],
+        ['Date',           new Date().toISOString().slice(0, 10)],
+        ['Author',         'Frederick Barton'],
+        ['Repository',     repo],
+        ['Classification', 'Internal Use'],
       ].map(([label, value], idx) =>
         new TableRow({
           children: [
             new TableCell({
               borders, width: { size: 2160, type: WidthType.DXA },
-              shading:  { fill: BLUE_LIGHT, type: ShadingType.CLEAR },
+              shading:  { fill: SILVER_100, type: ShadingType.CLEAR },
               margins:  { top: 80, bottom: 80, left: 120, right: 120 },
-              children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 22, font: 'Arial', color: '404040' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 20, font: 'Arial', color: ASPHALT_900 })] })],
             }),
             new TableCell({
               borders, width: { size: 4320, type: WidthType.DXA },
-              shading:  { fill: idx % 2 === 0 ? GRAY_LIGHT : 'FFFFFF', type: ShadingType.CLEAR },
+              shading:  { fill: idx % 2 === 0 ? 'FFFFFF' : SILVER_100, type: ShadingType.CLEAR },
               margins:  { top: 80, bottom: 80, left: 120, right: 120 },
-              children: [new Paragraph({ children: [new TextRun({ text: value, size: 22, font: 'Arial' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: value, size: 20, font: 'Times New Roman', color: ASPHALT_900 })] })],
             }),
           ],
         })
@@ -367,31 +400,31 @@ function buildDocument(projectName, version, repo, tag, sections) {
       ],
     },
     styles: {
-      default: { document: { run: { font: 'Arial', size: 22 } } },
+      default: { document: { run: { font: 'Times New Roman', size: 22, color: ASPHALT_900 } } },
       paragraphStyles: [
         { id: 'Heading1', name: 'Heading 1', basedOn: 'Normal', next: 'Normal', quickFormat: true,
-          run: { size: 32, bold: true, font: 'Arial', color: BLUE },
-          paragraph: { spacing: { before: 360, after: 120 }, outlineLevel: 0 } },
+          run: { size: 36, bold: true, font: 'Arial', color: BLUE_500 },
+          paragraph: { spacing: { before: 480, after: 240 }, outlineLevel: 0 } },
         { id: 'Heading2', name: 'Heading 2', basedOn: 'Normal', next: 'Normal', quickFormat: true,
-          run: { size: 26, bold: true, font: 'Arial', color: '404040' },
-          paragraph: { spacing: { before: 240, after: 80 }, outlineLevel: 1 } },
+          run: { size: 28, bold: true, font: 'Arial', color: ASPHALT_500 },
+          paragraph: { spacing: { before: 360, after: 180 }, outlineLevel: 1 } },
       ],
     },
     sections: [{
       properties: {
         page: {
-          size:   { width: 12240, height: 15840 },
-          margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+          size:   { width: 12240, height: 15840 },  // US Letter
+          margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },  // 1 inch
         },
       },
       headers: {
         default: new Header({
           children: [new Paragraph({
             children: [
-              new TextRun({ text: `${projectName}  `, size: 18, font: 'Arial', color: '808080' }),
-              new TextRun({ text: `v${version}`, size: 18, font: 'Arial', color: BLUE }),
+              new TextRun({ text: `${projectName}  `, size: 18, font: 'Arial', color: SILVER_400 }),
+              new TextRun({ text: `v${version}`, size: 18, font: 'Arial', color: BLUE_500 }),
             ],
-            border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: BLUE_LIGHT, space: 1 } },
+            border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: SILVER_400, space: 1 } },
           })],
         }),
       },
@@ -399,10 +432,10 @@ function buildDocument(projectName, version, repo, tag, sections) {
         default: new Footer({
           children: [new Paragraph({
             children: [
-              new TextRun({ text: `Frederick Barton  |  Generated ${new Date().toISOString().slice(0, 10)}`, size: 18, font: 'Arial', color: '808080' }),
+              new TextRun({ text: `Frederick Barton  |  Generated ${new Date().toISOString().slice(0, 10)}`, size: 18, font: 'Arial', color: SILVER_400 }),
             ],
             alignment: AlignmentType.RIGHT,
-            border: { top: { style: BorderStyle.SINGLE, size: 4, color: BLUE_LIGHT, space: 1 } },
+            border: { top: { style: BorderStyle.SINGLE, size: 4, color: SILVER_400, space: 1 } },
           })],
         }),
       },
