@@ -705,8 +705,13 @@ function buildHtml(projectName, version, repo, tag, sections) {
   // Build Word document
   const doc     = buildDocument(PROJECT_NAME, VERSION, REPO, TAG, sections);
   const buffer  = await Packer.toBuffer(doc);
-  const docPath = path.join(docsDir, `${PROJECT_NAME}.docx`);
+const docPath  = path.join(docsDir, `${PROJECT_NAME}.docx`);
   fs.writeFileSync(docPath, buffer);
-
   console.log(`Generated: ${docPath}`);
+
+  const html      = buildHtml(PROJECT_NAME, VERSION, REPO, TAG, sections);
+  const htmlName  = `${PROJECT_NAME}-${TAG}-UserGuide.html`;
+  const htmlPath  = path.join(docsDir, htmlName);
+  fs.writeFileSync(htmlPath, html, 'utf8');
+  console.log(`Generated: ${htmlPath}`);
 })();
