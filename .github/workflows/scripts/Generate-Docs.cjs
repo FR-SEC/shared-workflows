@@ -167,8 +167,14 @@ Table: File | Location | Description
 ## 9.3 Persisted State Files
 Table: File | Location | Reset Command
 
-# 10. Version History
+# 10. Related Tools
+Table: Project | Script | Purpose | Output. List other tools in the Sectra I/O engineering suite that complement this tool (e.g. Mirth-Backup, Cloud Conversion Toolkit, SCH ConfigManager exports). Include a short paragraph describing how outputs from this tool integrate with the others during cloud conversion workflows.
+
+# 11. Version History
 Use CHANGELOG.md as the authoritative source. Include all versions. Format each version as ## vX.Y.Z — YYYY-MM-DD with subsections for change categories.
+
+# 12. Document History
+Single-entry table: Version | Date | Changes. First entry should be "1.0.0 | [today's date] | Initial User Guide covering [tool name] [version]."
 
 Here is the project content:
 
@@ -489,17 +495,19 @@ function buildDocument(projectName, version, repo, tag, sections) {
 // ---------------------------------------------------------------------------
 function buildHtml(projectName, version, repo, tag, sections) {
   const sectionOrder = [
-    '1. Introduction',
-    '2. Prerequisites',
-    '3. Parameters & Command-Line Reference',
-    '4. First Run & Setup',
-    '5. Operations & Workflow',
-    '6. Configuration Reference',
-    '7. Examples',
-    '8. Error Guidance & Troubleshooting',
-    '9. File Reference',
-    '10. Version History',
-  ];
+      '1. Introduction',
+      '2. Prerequisites',
+      '3. Parameters & Command-Line Reference',
+      '4. First Run & Setup',
+      '5. Operations & Workflow',
+      '6. Configuration Reference',
+      '7. Examples',
+      '8. Error Guidance & Troubleshooting',
+      '9. File Reference',
+      '10. Related Tools',
+      '11. Version History',
+      '12. Document History',
+    ];
 
   function escHtml(s) {
     return String(s)
@@ -515,18 +523,24 @@ function buildHtml(projectName, version, repo, tag, sections) {
       .replace(/`([^`]+)`/g, '<code>$1</code>');
   }
 
-  function mdToHtml(text) {
+function mdToHtml(text) {
     if (!text) return '<p>—</p>';
-    const lines  = text.split('\n');
-    const out    = [];
-    let inCode   = false;
-    let codeLang = '';
-    let inUl     = false;
-    let inOl     = false;
-    let inTable  = false;
-    let tableRows = [];
+    const lines     = text.split('\n');
+    const out       = [];
+    let inCode      = false;
+    let codeLang    = '';
+    let codeLines   = [];
+    let inUl        = false;
+    let inOl        = false;
+    let inNestedUl  = false;
+    let inTable     = false;
+    let tableRows   = [];
 
+    const closeNestedUl = () => {
+      if (inNestedUl) { out.push('</ul>'); inNestedUl = false; }
+    };
     const closeList = () => {
+      closeNestedUl();
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (inOl) { out.push('</ol>'); inOl = false; }
     };
@@ -534,7 +548,7 @@ function buildHtml(projectName, version, repo, tag, sections) {
     const flushTable = () => {
       if (!inTable || tableRows.length === 0) return;
       const header = tableRows[0];
-      const body   = tableRows.slice(2); // skip separator row
+      const body   = tableRows.slice(2);
       let html = '<table><thead><tr>';
       for (const cell of header) html += `<th>${inlineFormat(cell.trim())}</th>`;
       html += '</tr></thead><tbody>';
@@ -555,23 +569,27 @@ function buildHtml(projectName, version, repo, tag, sections) {
       if (line.trim().startsWith('```')) {
         closeList(); flushTable();
         if (inCode) {
-          out.push('</code></pre>');
-          inCode = false; codeLang = '';
+          // suppress empty code blocks
+          const hasContent = codeLines.some(l => l.trim().length > 0);
+          if (hasContent) {
+            out.push(`<pre><code${codeLang ? ` class="language-${escHtml(codeLang)}"` : ''}>`);
+            out.push(...codeLines.map(l => escHtml(l)));
+            out.push('</code></pre>');
+          }
+          codeLines = []; inCode = false; codeLang = '';
         } else {
           codeLang = line.trim().slice(3).trim();
-          out.push(`<pre><code${codeLang ? ` class="language-${escHtml(codeLang)}"` : ''}>`);
-          inCode = true;
+          inCode   = true;
         }
         continue;
       }
-      if (inCode) { out.push(escHtml(line)); continue; }
+      if (inCode) { codeLines.push(line); continue; }
 
       // Table rows
       if (line.trim().startsWith('|')) {
         closeList();
         inTable = true;
-        const cells = line.trim().replace(/^\||\|$/g, '').split('|');
-        tableRows.push(cells);
+        tableRows.push(line.trim().replace(/^\||\|$/g, '').split('|'));
         continue;
       } else if (inTable) {
         flushTable();
@@ -606,16 +624,20 @@ function buildHtml(projectName, version, repo, tag, sections) {
       // Numbered list
       const numMatch = line.match(/^\s*\d+\.\s+(.+)/);
       if (numMatch) {
+        closeNestedUl();
         if (!inOl) { closeList(); out.push('<ol>'); inOl = true; }
         out.push(`<li>${inlineFormat(numMatch[1].trim())}</li>`);
         continue;
       }
 
-      // Bullet list
+      // Bullet list — nest inside ol if one is open
       const bulMatch = line.match(/^\s*[-*•]\s+(.+)/);
       if (bulMatch) {
-        const level = line.match(/^\s*/)[0].length;
-        if (!inUl) { closeList(); out.push(level >= 4 ? '<ul class="nested">' : '<ul>'); inUl = true; }
+        if (inOl) {
+          if (!inNestedUl) { out.push('<ul>'); inNestedUl = true; }
+        } else {
+          if (!inUl) { closeList(); out.push('<ul>'); inUl = true; }
+        }
         out.push(`<li>${inlineFormat(bulMatch[1].trim())}</li>`);
         continue;
       }
@@ -626,7 +648,11 @@ function buildHtml(projectName, version, repo, tag, sections) {
 
     closeList();
     flushTable();
-    if (inCode) out.push('</code></pre>');
+    if (inCode && codeLines.some(l => l.trim().length > 0)) {
+      out.push(`<pre><code${codeLang ? ` class="language-${escHtml(codeLang)}"` : ''}>`);
+      out.push(...codeLines.map(l => escHtml(l)));
+      out.push('</code></pre>');
+    }
 
     return out.join('\n');
   }
@@ -651,7 +677,7 @@ function buildHtml(projectName, version, repo, tag, sections) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escHtml(projectName)} ${escHtml(tag)} — System Administrator Guide</title>
+  <title>${escHtml(projectName)} ${escHtml(tag)} — User Guide</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;600&display=swap');
     :root {
@@ -805,26 +831,17 @@ function buildHtml(projectName, version, repo, tag, sections) {
 
 <div class="cover">
   <h1>${escHtml(projectName)}</h1>
-  <div class="subtitle">System Administrator Guide &mdash; ${escHtml(tag)}</div>
+  <div class="subtitle">User Guide &mdash; ${escHtml(tag)}</div>
   <div class="meta">
     Version: ${escHtml(version)} &nbsp;|&nbsp; Repository: ${escHtml(repo)}
     &nbsp;|&nbsp; Generated: ${new Date().toISOString().slice(0, 10)}
   </div>
 </div>
 
-<table class="meta-table">
-  <tr><td>Version</td><td>${escHtml(version)}</td></tr>
-  <tr><td>Tag</td><td>${escHtml(tag)}</td></tr>
-  <tr><td>Repository</td><td>${escHtml(repo)}</td></tr>
-  <tr><td>Generated</td><td>${new Date().toISOString().slice(0, 10)}</td></tr>
-  <tr><td>Author</td><td>Frederick Barton</td></tr>
-  <tr><td>Classification</td><td>Internal Use</td></tr>
-</table>
-
 ${sectionsHtml}
 
 <div class="footer">
-  ${escHtml(projectName)} System Administrator Guide &nbsp;|&nbsp;
+  ${escHtml(projectName)} User Guide &nbsp;|&nbsp;
   ${escHtml(tag)} &nbsp;|&nbsp;
   Frederick Barton &nbsp;|&nbsp;
   Generated ${new Date().toISOString().slice(0, 10)}
