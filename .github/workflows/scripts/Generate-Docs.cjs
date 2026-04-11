@@ -107,46 +107,68 @@ function readScripts(scriptPaths, root) {
 // Call Claude API to analyze codebase and generate documentation
 // ---------------------------------------------------------------------------
 async function generateDocContent(codeContent, projectName, version, repo) {
-  const prompt = `You are a senior technical writer producing professional Confluence documentation for "${projectName}" (version ${version}, repository: ${repo}).
+const prompt = `You are an expert technical writer and systems integration engineer. Your audience is Sectra Integration Engineers — experienced Windows/PowerShell practitioners working in medical imaging. Write with the precision and depth of internal engineering documentation, not a product brochure.
 
-You have been given the complete project source code AND supporting documentation files (APP_INFO.md, CHANGELOG.md, CLAUDE.md, ROADMAP.md, etc.). Use ALL of these sources — the markdown files contain authoritative information about the project's purpose, architecture, workflow, and change history that may not be obvious from the code alone.
+Using the project source code and supporting files provided, produce a System Administrator Guide for "${projectName}" (version ${version}, repository: ${repo}).
 
-Generate documentation with EXACTLY these sections in this order, using these exact headings:
+Tone and style rules:
+- Write for practitioners, not beginners. Do not explain PowerShell basics or Windows fundamentals.
+- Every statement must be grounded in the actual source material. Do not invent behavior.
+- Use specific names: actual parameter names, real file paths, true function behavior.
+- Do not use superlatives (powerful, robust, seamless, comprehensive, intelligent).
+- Keep prose concise. Prefer tables and lists over paragraphs when enumerating items.
+- Use blockquotes (> text) for key design principles, important warnings, and operational notes. These will render as callout boxes.
 
-# Overview
-What this project does, who it is for, and why it exists. Write 3-5 substantive paragraphs covering the problem it solves, how it works at a high level, and what makes it valuable. Use specific details from APP_INFO.md and CLAUDE.md — do not write generic filler.
+Generate documentation with EXACTLY these sections in this order. Use ## for subsection headings within each section.
 
-# Key Features
-Bullet points with bold feature names and concise descriptions. Derive from actual code capabilities and APP_INFO.md feature list.
+# 1. Introduction
+What this tool does and why it exists. 2-3 paragraphs. State the core design principle (e.g. what it does NOT do directly, what it delegates). End with a blockquote summarizing the key design principle.
 
-# Architecture
-How the application is structured internally. Cover the major components, data flow, and key design decisions. Reference CLAUDE.md for architectural details. Include a description of the output format/structure if the application produces files.
+# 2. Prerequisites
+## 2.1 System Requirements
+Table: Requirement | Details. Cover OS, PowerShell version, network, disk.
 
-# Requirements
-System requirements, dependencies, and prerequisites. Be specific about versions.
+## 2.2 Required Vendor Scripts
+Table: Script | Purpose. List every vendor script the tool locates and calls at runtime. Mark which are required vs optional.
 
-# Installation & Setup
-Step-by-step instructions from first download through first successful run. Include execution policy, certificate, and credential setup if applicable.
+## 2.3 Optional Tools
+Table: Tool | Purpose | Behavior When Missing. Cover any optional executables.
 
-# Usage
-Complete usage instructions with actual command examples. Cover first run, subsequent runs, all parameters and options. If there is a multi-step workflow (e.g. run on multiple servers then compare), document the full end-to-end process.
+## 2.4 Credential Requirements
+What credentials are needed, how they are stored (DPAPI, Export-Clixml, etc.), where the files are stored.
 
-# Configuration
-All configuration options with descriptions, default values, and valid ranges. Organize by category if applicable.
+# 3. Parameters & Command-Line Reference
+Table: Parameter | Type | Default | Description. Cover every param() parameter. Include switch parameters.
 
-# Examples
-3-5 real-world usage scenarios with actual commands and expected output. Not generic — use real parameter values and realistic context.
+# 4. First Run & Setup
+Step-by-step walkthrough of what happens on first run: vendor script discovery, credential prompts, config persistence. Include the exact command to launch normally and with common startup flags.
 
-# Known Limitations
-Specific, honest limitations derived from the code. Not generic caveats.
+# 5. Operations & Workflow
+## 5.1 [Primary workflow]
+## 5.2 [Secondary workflow]
+Document the main operational workflows with step-by-step numbered instructions. Include the menu structure if applicable.
 
-# Change Log
-Use the CHANGELOG.md file (if present) as the authoritative source. Include all versions with their changes, not just the current version. Format each version as a subsection.
+# 6. Configuration Reference
+All persisted configuration: what is stored, where, and how to reset it. Table: Setting | Storage Location | Reset Command.
 
-# Roadmap
-If ROADMAP.md exists, include planned features. If empty or absent, state "No planned features at this time."
+# 7. Examples
+5-6 real command examples with realistic context (e.g. "Pre-conversion export for a cloud migration project"). Use actual parameter values. Each example: a short title, the command block, and 1-2 sentences of context. Do not use generic placeholder values.
 
-Write in a clear, factual, understated tone. This is internal technical documentation, not a product brochure. State what the tool does plainly — do not use superlatives, marketing language, or promotional phrasing. Avoid words like "powerful", "comprehensive", "robust", "seamless", "excels", "cutting-edge", "smart", "intelligent", or "optimized". Do not editorialize about the tool's value or quality — let the reader decide. Every statement must be grounded in the actual source material provided. Do not invent features, fabricate examples, or include placeholder text. If a section has limited information, keep it short rather than padding with generic content.
+# 8. Error Guidance & Troubleshooting
+Table or subsections covering common failure modes with: Symptom | Likely Cause | Resolution. Be specific — name the actual error text or behavior, not generic categories.
+
+# 9. File Reference
+## 9.1 Project Files
+Table: File | Purpose
+
+## 9.2 Output Files
+Table: File | Location | Description
+
+## 9.3 Persisted State Files
+Table: File | Location | Reset Command
+
+# 10. Version History
+Use CHANGELOG.md as the authoritative source. Include all versions. Format each version as ## vX.Y.Z — YYYY-MM-DD with subsections for change categories.
 
 Here is the project content:
 
@@ -467,11 +489,349 @@ function buildDocument(projectName, version, repo, tag, sections) {
 // ---------------------------------------------------------------------------
 function buildHtml(projectName, version, repo, tag, sections) {
   const sectionOrder = [
-    'Overview', 'Key Features', 'Architecture',
-    'Requirements', 'Installation & Setup', 'Usage',
-    'Configuration', 'Examples', 'Known Limitations',
-    'Change Log', 'Roadmap',
+    '1. Introduction',
+    '2. Prerequisites',
+    '3. Parameters & Command-Line Reference',
+    '4. First Run & Setup',
+    '5. Operations & Workflow',
+    '6. Configuration Reference',
+    '7. Examples',
+    '8. Error Guidance & Troubleshooting',
+    '9. File Reference',
+    '10. Version History',
   ];
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function inlineFormat(s) {
+    return s
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+  }
+
+  function mdToHtml(text) {
+    if (!text) return '<p>—</p>';
+    const lines  = text.split('\n');
+    const out    = [];
+    let inCode   = false;
+    let codeLang = '';
+    let inUl     = false;
+    let inOl     = false;
+    let inTable  = false;
+    let tableRows = [];
+
+    const closeList = () => {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+    };
+
+    const flushTable = () => {
+      if (!inTable || tableRows.length === 0) return;
+      const header = tableRows[0];
+      const body   = tableRows.slice(2); // skip separator row
+      let html = '<table><thead><tr>';
+      for (const cell of header) html += `<th>${inlineFormat(cell.trim())}</th>`;
+      html += '</tr></thead><tbody>';
+      for (const row of body) {
+        if (!row.length) continue;
+        html += '<tr>';
+        for (const cell of row) html += `<td>${inlineFormat(cell.trim())}</td>`;
+        html += '</tr>';
+      }
+      html += '</tbody></table>';
+      out.push(html);
+      tableRows = [];
+      inTable   = false;
+    };
+
+    for (const line of lines) {
+      // Code fence
+      if (line.trim().startsWith('```')) {
+        closeList(); flushTable();
+        if (inCode) {
+          out.push('</code></pre>');
+          inCode = false; codeLang = '';
+        } else {
+          codeLang = line.trim().slice(3).trim();
+          out.push(`<pre><code${codeLang ? ` class="language-${escHtml(codeLang)}"` : ''}>`);
+          inCode = true;
+        }
+        continue;
+      }
+      if (inCode) { out.push(escHtml(line)); continue; }
+
+      // Table rows
+      if (line.trim().startsWith('|')) {
+        closeList();
+        inTable = true;
+        const cells = line.trim().replace(/^\||\|$/g, '').split('|');
+        tableRows.push(cells);
+        continue;
+      } else if (inTable) {
+        flushTable();
+      }
+
+      // Blank line
+      if (!line.trim()) {
+        closeList();
+        out.push('<p></p>');
+        continue;
+      }
+
+      // Headings
+      const h4 = line.match(/^####\s+(.+)/);
+      if (h4) { closeList(); out.push(`<h4>${inlineFormat(h4[1])}</h4>`); continue; }
+      const h3 = line.match(/^###\s+(.+)/);
+      if (h3) { closeList(); out.push(`<h3>${inlineFormat(h3[1])}</h3>`); continue; }
+      const h2 = line.match(/^##\s+(.+)/);
+      if (h2) { closeList(); out.push(`<h2>${inlineFormat(h2[1])}</h2>`); continue; }
+
+      // Blockquote → callout
+      const bq = line.match(/^>\s*(.*)/);
+      if (bq) {
+        closeList();
+        const cls = /warning|caution|danger/i.test(bq[1]) ? 'callout callout-warning'
+                  : /tip|note|important/i.test(bq[1])     ? 'callout callout-info'
+                  : 'callout';
+        out.push(`<div class="${cls}"><strong>Note:</strong> ${inlineFormat(bq[1])}</div>`);
+        continue;
+      }
+
+      // Numbered list
+      const numMatch = line.match(/^\s*\d+\.\s+(.+)/);
+      if (numMatch) {
+        if (!inOl) { closeList(); out.push('<ol>'); inOl = true; }
+        out.push(`<li>${inlineFormat(numMatch[1].trim())}</li>`);
+        continue;
+      }
+
+      // Bullet list
+      const bulMatch = line.match(/^\s*[-*•]\s+(.+)/);
+      if (bulMatch) {
+        const level = line.match(/^\s*/)[0].length;
+        if (!inUl) { closeList(); out.push(level >= 4 ? '<ul class="nested">' : '<ul>'); inUl = true; }
+        out.push(`<li>${inlineFormat(bulMatch[1].trim())}</li>`);
+        continue;
+      }
+
+      closeList();
+      out.push(`<p>${inlineFormat(line.trim())}</p>`);
+    }
+
+    closeList();
+    flushTable();
+    if (inCode) out.push('</code></pre>');
+
+    return out.join('\n');
+  }
+
+  const repoName = repo.split('/').pop() || projectName;
+
+  const sectionsHtml = sectionOrder.map(title => {
+    // Match sections whether Claude prefixes with number or not
+    const key = Object.keys(sections).find(k =>
+      k === title || k.replace(/^\d+\.\s*/, '') === title.replace(/^\d+\.\s*/, '')
+    ) || title;
+    const content = sections[key] || sections[title] || '';
+    return `
+  <section>
+    <h1>${escHtml(title)}</h1>
+    ${mdToHtml(content)}
+  </section>`;
+  }).join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escHtml(projectName)} ${escHtml(tag)} — System Administrator Guide</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;600&display=swap');
+    :root {
+      --blue-500:    #3C73BB;
+      --asphalt-500: #1E3A5F;
+      --asphalt-900: #071326;
+      --silver-50:   #F7F9FC;
+      --silver-100:  #EEF2F7;
+      --silver-400:  #C9D3DE;
+      --warning-bg:  #FDECEA;
+      --warning-text:#B71C1C;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 11pt;
+      line-height: 1.4;
+      color: var(--asphalt-900);
+      background: #fff;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 40px;
+    }
+    .cover {
+      background: var(--asphalt-500);
+      color: var(--silver-50);
+      padding: 30px 40px;
+      margin: -40px -40px 30px -40px;
+    }
+    .cover h1 {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 24pt; font-weight: bold;
+      margin: 0 0 8px 0; color: var(--silver-50); border: none;
+    }
+    .cover .subtitle {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14pt; color: var(--silver-50); opacity: .9;
+    }
+    .cover .meta {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10pt; margin-top: 16px; color: var(--silver-50); opacity: .8;
+    }
+    h1 {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 18pt; font-weight: bold;
+      color: var(--blue-500);
+      border-bottom: 2px solid var(--blue-500);
+      padding-bottom: 6px;
+      margin-top: 36px; margin-bottom: 12px;
+    }
+    h2 {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14pt; font-weight: bold;
+      color: var(--asphalt-500);
+      margin-top: 24px; margin-bottom: 9px;
+    }
+    h3 {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12pt; font-weight: bold;
+      color: var(--asphalt-500);
+      margin-top: 18px; margin-bottom: 6px;
+    }
+    h4 {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11pt; font-weight: bold; font-style: italic;
+      color: var(--asphalt-900);
+      margin-top: 12px; margin-bottom: 4px;
+    }
+    section { margin-bottom: 0; }
+    p  { margin: 0 0 8px 0; }
+    ul, ol { margin: 0 0 8px 20px; }
+    li { margin: 0 0 4px 0; }
+    ul.nested { margin-left: 36px; }
+    table {
+      border-collapse: collapse; width: 100%;
+      margin: 12px 0; font-size: 10pt;
+    }
+    th {
+      background: var(--blue-500); color: var(--silver-50);
+      font-family: Arial, Helvetica, sans-serif; font-weight: bold;
+      text-align: left; padding: 6px 10px;
+      border: 1px solid var(--silver-400);
+    }
+    td {
+      padding: 4px 10px;
+      border: 1px solid var(--silver-400);
+      font-family: 'Times New Roman', Times, serif;
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: var(--silver-100); }
+    pre, code {
+      font-family: 'Source Code Pro', 'Courier New', Courier, monospace;
+      font-size: 9pt;
+    }
+    pre {
+      background: var(--silver-100);
+      border: 1px solid var(--silver-400);
+      border-left: 4px solid var(--blue-500);
+      padding: 12px 16px;
+      overflow-x: auto; line-height: 1.4;
+      margin: 8px 0 12px 0;
+    }
+    code {
+      background: var(--silver-100);
+      padding: 1px 4px; border-radius: 3px;
+    }
+    pre code { background: none; padding: 0; }
+    .callout {
+      border-left: 4px solid var(--blue-500);
+      background: var(--silver-100);
+      padding: 12px 16px; margin: 12px 0;
+    }
+    .callout strong { font-family: Arial, Helvetica, sans-serif; }
+    .callout-warning {
+      border-left-color: var(--warning-text);
+      background: var(--warning-bg);
+    }
+    .callout-info {
+      border-left-color: #1565C0;
+      background: #E3F2FD;
+    }
+    .meta-table {
+      width: 100%; border-collapse: collapse;
+      margin: 0 0 24px 0;
+      font-family: Arial, Helvetica, sans-serif; font-size: 10pt;
+    }
+    .meta-table td {
+      padding: 4px 10px;
+      border: 1px solid var(--silver-400);
+    }
+    .meta-table td:first-child {
+      background: var(--silver-100); font-weight: bold; width: 140px;
+    }
+    .footer {
+      margin-top: 48px; padding: 12px 0;
+      border-top: 1px solid var(--silver-400);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 9pt; color: #888; text-align: center;
+    }
+    @media print {
+      body { max-width: none; padding: 0; font-size: 10pt; }
+      .cover { margin: 0 0 20px 0; }
+      pre { white-space: pre-wrap; word-wrap: break-word; }
+      h1 { page-break-before: always; }
+      h1:first-of-type { page-break-before: avoid; }
+      table { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>${escHtml(projectName)}</h1>
+  <div class="subtitle">System Administrator Guide &mdash; ${escHtml(tag)}</div>
+  <div class="meta">
+    Version: ${escHtml(version)} &nbsp;|&nbsp; Repository: ${escHtml(repo)}
+    &nbsp;|&nbsp; Generated: ${new Date().toISOString().slice(0, 10)}
+  </div>
+</div>
+
+<table class="meta-table">
+  <tr><td>Version</td><td>${escHtml(version)}</td></tr>
+  <tr><td>Tag</td><td>${escHtml(tag)}</td></tr>
+  <tr><td>Repository</td><td>${escHtml(repo)}</td></tr>
+  <tr><td>Generated</td><td>${new Date().toISOString().slice(0, 10)}</td></tr>
+  <tr><td>Author</td><td>Frederick Barton</td></tr>
+  <tr><td>Classification</td><td>Internal Use</td></tr>
+</table>
+
+${sectionsHtml}
+
+<div class="footer">
+  ${escHtml(projectName)} System Administrator Guide &nbsp;|&nbsp;
+  ${escHtml(tag)} &nbsp;|&nbsp;
+  Frederick Barton &nbsp;|&nbsp;
+  Generated ${new Date().toISOString().slice(0, 10)}
+</div>
+</body>
+</html>`;
+}
 
   function mdToHtml(text) {
     if (!text) return '<p>—</p>';
