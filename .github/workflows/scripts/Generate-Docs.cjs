@@ -115,7 +115,7 @@ Tone and style rules:
 - Write for practitioners, not beginners. Do not explain PowerShell basics or Windows fundamentals.
 - Every statement must be grounded in the actual source material. Do not invent behavior.
 - Use specific names: actual parameter names, real file paths, true function behavior.
-- Do not use superlatives (powerful, robust, seamless, comprehensive, intelligent).
+- Do not use superlatives or marketing language (powerful, robust, seamless, comprehensive, intelligent, enterprise-grade, production-ready, best-in-class, cutting-edge, next-generation).
 - Keep prose concise. Prefer tables and lists over paragraphs when enumerating items.
 - Use blockquotes (> text) for key design principles, important warnings, and operational notes. These will render as callout boxes.
 
@@ -153,6 +153,7 @@ All persisted configuration: what is stored, where, and how to reset it. Table: 
 
 # 7. Examples
 5-6 real command examples with realistic context (e.g. "Pre-conversion export for a cloud migration project"). Use actual parameter values. Each example: a short title, the command block, and 1-2 sentences of context. Do not use generic placeholder values.
+Only use parameters that appear in the param() block of the script. Do not invent parameters.
 
 # 8. Error Guidance & Troubleshooting
 Table or subsections covering common failure modes with: Symptom | Likely Cause | Resolution. Be specific — name the actual error text or behavior, not generic categories.
@@ -168,7 +169,7 @@ Table: File | Location | Description
 Table: File | Location | Reset Command
 
 # 10. Related Tools
-Table: Project | Script | Purpose | Output. List other tools in the Sectra I/O engineering suite that complement this tool (e.g. Mirth-Backup, Cloud Conversion Toolkit, SCH ConfigManager exports). Include a short paragraph describing how outputs from this tool integrate with the others during cloud conversion workflows.
+Table: Project | Script | Purpose | Output. Only list tools that are explicitly referenced by name in the provided source files (CLAUDE.md, APP_INFO.md, CHANGELOG.md, or the main script). Do not invent project names, script names, or capabilities. If no related tools are mentioned in the source material, write a single paragraph stating that and describing only what this tool's outputs are used for based on what the source files say.
 
 # 11. Version History
 Use CHANGELOG.md as the authoritative source. Include all versions. Format each version as ## vX.Y.Z — YYYY-MM-DD with subsections for change categories.
